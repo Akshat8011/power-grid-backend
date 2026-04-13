@@ -202,14 +202,8 @@ class FaultRequest(BaseModel):
 
 @app.get("/")
 def root():
-    return {
-        "status": "online",
-        "engine": "pandapower",
-        "grid_name": MASTER_NET.name,
-        "buses": len(MASTER_NET.bus),
-        "lines": len(MASTER_NET.line),
-        "loads": len(MASTER_NET.load),
-    }
+    return {"status": "ok"}
+
 
 
 # ══════════════════════════════════════════════════
@@ -217,6 +211,7 @@ def root():
 # ══════════════════════════════════════════════════
 
 @app.post("/api/loadflow")
+@app.post("/api/loadflow/")
 def run_load_flow(req: LoadFlowRequest):
     """
     Accepts dynamic load values from the 3D frontend, runs Newton-Raphson
@@ -332,6 +327,7 @@ def run_load_flow(req: LoadFlowRequest):
 # ══════════════════════════════════════════════════
 
 @app.post("/api/fault")
+@app.post("/api/fault/")
 def run_fault_analysis(req: FaultRequest):
     """
     Simulates a fault at the specified bus using IEC 60909.
