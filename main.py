@@ -214,17 +214,20 @@ def run_fault_analysis(req: FaultRequest):
         raise HTTPException(status_code=400, detail="Invalid bus index")
 
     try:
-        # IEC 60909 SC Calculation
-        sc.calc_sc(net, bus=req.bus_index, fault=req.fault_type, ip=True, ith=True)
+        # Diagnostic: Try a simpler calculation first for 1ph
+        if req.fault_type == "1ph":
+            sc.calc_sc(net, bus=req.bus_index, fault=req.fault_type)
+        else:
+            sc.calc_sc(net, bus=req.bus_index, fault=req.fault_type, ip=True, ith=True)
         
         # SC Results
         res = net.res_bus_sc.loc[req.bus_index]
         
-        # Identify blackout zones (simplified: all load buses downstream of fault)
-        # In our radial grid: 2(sub) -> 3(res), 4(com), 5(ind)
+        # Identify blackout zones
         downstream = [3, 4, 5] if req.bus_index <= 2 else [req.bus_index]
         
         return {
+            "success": True,
             "faulted_bus_index": req.bus_index,
             "faulted_bus_name": net.bus.at[req.bus_index, "name"],
             "fault_current": {
@@ -234,11 +237,17 @@ def run_fault_analysis(req: FaultRequest):
             "breaker_trip": True,
             "downstream_buses_offline": downstream,
             "blackout_zones": [net.bus.at[i, "name"] for i in downstream],
-            "faulted_line_index": 0 # Default line trip for visual
+            "faulted_line_index": 0 
         }
     except Exception as e:
-        logger.error("FAULT ERROR: %s", str(e))
-        raise HTTPException(status_code=500, detail=f"Short-circuit calculation failed: {str(e)}")
+        logger.error("DIAGNOSTIC FAULT ERROR: %s", str(e))
+        # Return 200 but with success=False to see the error in the browser console
+        return {
+            "success": False,
+            "error": str(e),
+            "detail": f"Physics Error: {str(e)}"
+        }
+
 
 # ENTRYPOINT
 if __name__ == "__main__":
