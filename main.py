@@ -156,17 +156,17 @@ def create_city_grid() -> pp.pandapowerNet:
     # ── STATIC GENERATORS (Rooftop Solar DERs) ───
     # Some residential houses have solar panels (total ~20 kW)
     pp.create_sgen(
-        net, bus=bus_res, p_mw=0.020, q_mvar=0.0,
+        net, bus=bus_res, p_mw=0.020, q_mvar=0.0, sn_mva=0.025,
         name="Residential Rooftop Solar", type="PV"
     )
     # Supermarket rooftop solar (20 kW)
     pp.create_sgen(
-        net, bus=bus_com, p_mw=0.020, q_mvar=0.0,
+        net, bus=bus_com, p_mw=0.020, q_mvar=0.0, sn_mva=0.025,
         name="Commercial Rooftop Solar", type="PV"
     )
     # Hospital backup solar (50 kW)
     pp.create_sgen(
-        net, bus=bus_ind, p_mw=0.050, q_mvar=0.0,
+        net, bus=bus_ind, p_mw=0.050, q_mvar=0.0, sn_mva=0.060,
         name="Hospital Solar Farm", type="PV"
     )
 
