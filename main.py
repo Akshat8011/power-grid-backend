@@ -127,10 +127,10 @@ def create_city_grid() -> pp.pandapowerNet:
     pp.create_load(net, bus=bus_com, p_mw=0.150, q_mvar=0.064, name="Commercial Load")
     pp.create_load(net, bus=bus_ind, p_mw=0.950, q_mvar=0.588, name="Industrial Load")
 
-    # 6. SOLAR (With sn_mva for fault contribution)
-    pp.create_sgen(net, bus=bus_res, p_mw=0.02, sn_mva=0.025, name="Res Solar")
-    pp.create_sgen(net, bus=bus_com, p_mw=0.02, sn_mva=0.025, name="Com Solar")
-    pp.create_sgen(net, bus=bus_ind, p_mw=0.05, sn_mva=0.060, name="Ind Solar")
+    # 6. SOLAR (With sn_mva and k for fault contribution)
+    pp.create_sgen(net, bus=bus_res, p_mw=0.02, sn_mva=0.03, k=1.0, name="Res Solar")
+    pp.create_sgen(net, bus=bus_com, p_mw=0.02, sn_mva=0.03, k=1.0, name="Com Solar")
+    pp.create_sgen(net, bus=bus_ind, p_mw=0.05, sn_mva=0.07, k=1.0, name="Ind Solar")
 
     return net
 
