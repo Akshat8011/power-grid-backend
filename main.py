@@ -1,88 +1,45 @@
-"""
-Power Grid Digital Twin — Backend Engine
-=========================================
-Uses pandapower for Newton-Raphson load flow & IEC 60909 short-circuit analysis.
-Deployed on Railway, consumed by React Three Fiber frontend on Vercel.
-"""
-
 import os
 import copy
 import logging
-from typing import Dict, Optional
-
+import numpy as np
 import pandapower as pp
 import pandapower.shortcircuit as sc
-import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Optional
 
 # ══════════════════════════════════════════════════
-#  LOGGING
+#  LOGGING CONFIGURATION
 # ══════════════════════════════════════════════════
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("grid-engine")
+logger = logging.getLogger("power-grid-physics")
 
 # ══════════════════════════════════════════════════
-#  FASTAPI APP + CORS
+#  FASTAPI SETUP
 # ══════════════════════════════════════════════════
 app = FastAPI(
     title="Power Grid Digital Twin — Physics Engine",
-    version="1.0.0",
-    description="pandapower-based load flow & fault analysis API for the 3D city grid.",
+    version="1.1.0",
+    description="SC-Hardened pandapower API.",
 )
 
-# Allow both local dev and production Vercel domain
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://load-analysis.vercel.app",
-    os.getenv("FRONTEND_URL", ""),        # Railway env var override
-]
-# Filter out empty strings
-ALLOWED_ORIGINS = [o for o in ALLOWED_ORIGINS if o]
-
+# Global CORS — Allow all origins to support Vercel/DigitalZen/Local
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False, # Must be False for wildcard origins
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-
 # ══════════════════════════════════════════════════
-#  PANDAPOWER GRID DEFINITION
+#  PANDAPOWER GRID DEFINITION (SC-HARDENED)
 # ══════════════════════════════════════════════════
 def create_city_grid() -> pp.pandapowerNet:
-    """
-    Build a realistic city distribution grid:
+    net = pp.create_empty_network(name="CityGrid_v2", f_hz=50.0)
 
-    External Grid (Slack)
-        │  110 kV
-        ▼
-    Bus 0 ── HV Bus (110 kV)
-        │
-      [Transformer 110/33 kV]
-        │
-    Bus 1 ── MV Primary Bus (33 kV)
-        │
-      [Transformer 33/11 kV]
-        │
-    Bus 2 ── MV Secondary Bus (11 kV)   ← Central City Substation
-        │
-        ├── Line → Bus 3 (Residential District)
-        │             └ Load: 24 houses × ~4 kW = 96 kW
-        │
-        ├── Line → Bus 4 (Commercial District)
-        │             └ Load: Supermarket 100kW + School 50kW = 150 kW
-        │
-        └── Line → Bus 5 (Industrial/Medical District)
-                      └ Load: Hospital 500kW + Factory 450kW = 950 kW
-    """
-    net = pp.create_empty_network(name="CityGrid_v1", f_hz=50.0)
-
-    # ── BUSES ──────────────────────────────────────
+    # 1. BUS PRESET (HV -> MV1 -> MV2 -> Dist)
     bus_hv    = pp.create_bus(net, vn_kv=110, name="HV Bus (110kV)")              # 0
     bus_mv1   = pp.create_bus(net, vn_kv=33,  name="MV Primary (33kV)")           # 1
     bus_mv2   = pp.create_bus(net, vn_kv=11,  name="MV Substation (11kV)")        # 2
@@ -90,339 +47,175 @@ def create_city_grid() -> pp.pandapowerNet:
     bus_com   = pp.create_bus(net, vn_kv=11,  name="Commercial District (11kV)")  # 4
     bus_ind   = pp.create_bus(net, vn_kv=11,  name="Industrial District (11kV)")  # 5
 
-    # ── EXTERNAL GRID (Slack / Infinite Bus) ──────
+    # 2. EXTERNAL GRID (Full IEC 60909 Parameters)
     pp.create_ext_grid(
-        net, bus=bus_hv, vm_pu=1.02, name="Utility Grid Connection",
-        s_sc_max_mva=1000, rx_max=0.1,   # Positive sequence
+        net, bus=bus_hv, vm_pu=1.02, name="Utility Grid",
+        s_sc_max_mva=1000, rx_max=0.1,  
         s_sc_min_mva=800,  rx_min=0.1,
-        x0x_max=0.1, r0x0_max=0.1,        # Zero sequence (CORRECTED COL NAME)
+        x0x_max=0.1, r0x0_max=0.1, # Zero sequence resistance/reactance ratio
     )
 
-    # ── TRANSFORMERS ──────────────────────────────
-    # 110 kV → 33 kV  (Step-Down #1)
+    # 3. TRANSFORMERS (With Z-sequence impedance for faults)
+    # T1: 110/33kV
     pp.create_transformer_from_parameters(
         net, hv_bus=bus_hv, lv_bus=bus_mv1,
         sn_mva=63, vn_hv_kv=110, vn_lv_kv=33,
         vkr_percent=0.1, vk_percent=10, pfe_kw=20, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1, # Numeric zero-sequence (FIX for pandas error)
-        name="Step-Down 110→33kV"
+        vk0_percent=10, vkr0_percent=0.1, # Short-circuit requirement
+        name="T1: 110/33kV"
     )
-    # 33 kV → 11 kV   (Step-Down #2, the City Substation)
+    # T2: 33/11kV (Central Substation)
     pp.create_transformer_from_parameters(
         net, hv_bus=bus_mv1, lv_bus=bus_mv2,
         sn_mva=25, vn_hv_kv=33, vn_lv_kv=11,
         vkr_percent=0.1, vk_percent=10, pfe_kw=10, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1, # Numeric zero-sequence (FIX for pandas error)
-        name="Substation Step-Down 33→11kV"
+        vk0_percent=10, vkr0_percent=0.1, # Short-circuit requirement
+        name="T2: 11/33kV"
     )
 
-    # ── DISTRIBUTION LINES (11 kV feeders) ────────
-    # Residential feeder: 5 km
-    pp.create_line(
-        net, from_bus=bus_mv2, to_bus=bus_res,
-        length_km=5.0, std_type="NAYY 4x50 SE",
-        name="Feeder → Residential"
+    # 4. LINES (Manually enriched with sequence parameters)
+    # Standard cable metrics for 11kV: NAYY 4x50 SE (R1=0.642, X1=0.083 per km)
+    r1 = 0.642; x1 = 0.083; c1 = 210
+    # Engineering heuristic: Z0 ≈ 4 * Z1
+    r0 = r1 * 4; x0 = x1 * 4; c0 = c1
+
+    pp.create_line_from_parameters(
+        net, from_bus=bus_mv2, to_bus=bus_res, length_km=5.0,
+        r_ohm_per_km=r1, x_ohm_per_km=x1, c_nf_per_km=c1, max_i_ka=0.21,
+        r0_ohm_per_km=r0, x0_ohm_per_km=x0, c0_nf_per_km=c0, # Mandatory for SC
+        name="Feeder → residential"
     )
-    # Commercial feeder: 4 km
-    pp.create_line(
-        net, from_bus=bus_mv2, to_bus=bus_com,
-        length_km=4.0, std_type="NAYY 4x50 SE",
-        name="Feeder → Commercial"
+    pp.create_line_from_parameters(
+        net, from_bus=bus_mv2, to_bus=bus_com, length_km=4.0,
+        r_ohm_per_km=r1, x_ohm_per_km=x1, c_nf_per_km=c1, max_i_ka=0.21,
+        r0_ohm_per_km=r0, x0_ohm_per_km=x0, c0_nf_per_km=c0, # Mandatory for SC
+        name="Feeder → commercial"
     )
-    # Industrial feeder: 8 km
-    pp.create_line(
-        net, from_bus=bus_mv2, to_bus=bus_ind,
-        length_km=8.0, std_type="NAYY 4x50 SE",
-        name="Feeder → Industrial"
+    pp.create_line_from_parameters(
+        net, from_bus=bus_mv2, to_bus=bus_ind, length_km=8.0,
+        r_ohm_per_km=r1, x_ohm_per_km=x1, c_nf_per_km=c1, max_i_ka=0.21,
+        r0_ohm_per_km=r0, x0_ohm_per_km=x0, c0_nf_per_km=c0, # Mandatory for SC
+        name="Feeder → industrial"
     )
 
-    # ── LOADS ─────────────────────────────────────
-    # Residential: 24 houses × 4 kW avg = 96 kW active, pf ≈ 0.95
-    pp.create_load(
-        net, bus=bus_res, p_mw=0.096, q_mvar=0.031,
-        name="Residential Load"
-    )
-    # Commercial: Supermarket (100 kW) + School (50 kW) = 150 kW, pf ≈ 0.92
-    pp.create_load(
-        net, bus=bus_com, p_mw=0.150, q_mvar=0.064,
-        name="Commercial Load"
-    )
-    # Industrial: Hospital (500 kW) + Factory (450 kW) = 950 kW, pf ≈ 0.85
-    pp.create_load(
-        net, bus=bus_ind, p_mw=0.950, q_mvar=0.588,
-        name="Industrial Load"
-    )
+    # 5. LOADS
+    pp.create_load(net, bus=bus_res, p_mw=0.096, q_mvar=0.031, name="Residential Load")
+    pp.create_load(net, bus=bus_com, p_mw=0.150, q_mvar=0.064, name="Commercial Load")
+    pp.create_load(net, bus=bus_ind, p_mw=0.950, q_mvar=0.588, name="Industrial Load")
 
-    # ── STATIC GENERATORS (Rooftop Solar DERs) ───
-    # Some residential houses have solar panels (total ~20 kW)
-    pp.create_sgen(
-        net, bus=bus_res, p_mw=0.020, q_mvar=0.0, sn_mva=0.025,
-        name="Residential Rooftop Solar", type="PV"
-    )
-    # Supermarket rooftop solar (20 kW)
-    pp.create_sgen(
-        net, bus=bus_com, p_mw=0.020, q_mvar=0.0, sn_mva=0.025,
-        name="Commercial Rooftop Solar", type="PV"
-    )
-    # Hospital backup solar (50 kW)
-    pp.create_sgen(
-        net, bus=bus_ind, p_mw=0.050, q_mvar=0.0, sn_mva=0.060,
-        name="Hospital Solar Farm", type="PV"
-    )
+    # 6. SOLAR (With sn_mva for fault contribution)
+    pp.create_sgen(net, bus=bus_res, p_mw=0.02, sn_mva=0.025, name="Res Solar")
+    pp.create_sgen(net, bus=bus_com, p_mw=0.02, sn_mva=0.025, name="Com Solar")
+    pp.create_sgen(net, bus=bus_ind, p_mw=0.05, sn_mva=0.060, name="Ind Solar")
 
-    logger.info("✅ pandapower grid created: %d buses, %d lines, %d loads",
-                len(net.bus), len(net.line), len(net.load))
     return net
 
-
-# Create the master grid once at startup
 MASTER_NET = create_city_grid()
 
-
 # ══════════════════════════════════════════════════
-#  PYDANTIC REQUEST / RESPONSE MODELS
+#  API MODELS
 # ══════════════════════════════════════════════════
-
 class LoadFlowRequest(BaseModel):
-    """
-    Dynamic load values from frontend appliance toggles.
-    All values in kW. The backend converts to MW for pandapower.
-    """
-    residential_kw: float = 96.0
-    commercial_kw: float = 150.0
-    industrial_kw: float = 950.0
-    # Optional solar generation overrides (kW)
-    residential_solar_kw: float = 20.0
-    commercial_solar_kw: float = 20.0
-    industrial_solar_kw: float = 50.0
-
+    residential_kw: float
+    commercial_kw: float
+    industrial_kw: float
+    residential_solar_kw: float
+    commercial_solar_kw: float
+    industrial_solar_kw: float
 
 class FaultRequest(BaseModel):
-    """Fault simulation parameters."""
-    bus_index: int = 2        # Default: fault at the City Substation bus
-    fault_type: str = "3ph"   # '3ph' or '2ph' or '1ph'
-
+    bus_index: int
+    fault_type: str
 
 # ══════════════════════════════════════════════════
-#  HEALTH CHECK
+#  ENDPOINTS
 # ══════════════════════════════════════════════════
 
 @app.get("/")
 def root():
-    return {"status": "ok"}
-
-
-
-# ══════════════════════════════════════════════════
-#  PHASE 3: LOAD FLOW ANALYSIS
-# ══════════════════════════════════════════════════
+    return {"status": "ok", "version": "1.1.0"}
 
 @app.post("/api/loadflow")
 @app.post("/api/loadflow/")
 def run_load_flow(req: LoadFlowRequest):
-    """
-    Accepts dynamic load values from the 3D frontend, runs Newton-Raphson
-    power flow, and returns bus voltages, line loadings, and total losses.
-    """
-    # Deep copy so concurrent requests don't mutate the master grid
     net = copy.deepcopy(MASTER_NET)
-
-    # Power factor assumptions for reactive power
-    PF_RES = 0.95   # Residential
-    PF_COM = 0.92   # Commercial
-    PF_IND = 0.85   # Industrial
-
+    
     def kw_to_mw(kw): return round(kw / 1000.0, 6)
-    def kw_to_mvar(kw, pf): return round((kw / 1000.0) * np.tan(np.arccos(pf)), 6)
-
-    # Update loads (indices match creation order: 0=res, 1=com, 2=ind)
-    net.load.at[0, "p_mw"]    = kw_to_mw(req.residential_kw)
-    net.load.at[0, "q_mvar"]  = kw_to_mvar(req.residential_kw, PF_RES)
-
-    net.load.at[1, "p_mw"]    = kw_to_mw(req.commercial_kw)
-    net.load.at[1, "q_mvar"]  = kw_to_mvar(req.commercial_kw, PF_COM)
-
-    net.load.at[2, "p_mw"]    = kw_to_mw(req.industrial_kw)
-    net.load.at[2, "q_mvar"]  = kw_to_mvar(req.industrial_kw, PF_IND)
-
-    # Update solar generation
+    
+    # Update loads
+    net.load.at[0, "p_mw"] = kw_to_mw(req.residential_kw)
+    net.load.at[1, "p_mw"] = kw_to_mw(req.commercial_kw)
+    net.load.at[2, "p_mw"] = kw_to_mw(req.industrial_kw)
+    
+    # Update sgen
     net.sgen.at[0, "p_mw"] = kw_to_mw(req.residential_solar_kw)
     net.sgen.at[1, "p_mw"] = kw_to_mw(req.commercial_solar_kw)
     net.sgen.at[2, "p_mw"] = kw_to_mw(req.industrial_solar_kw)
 
-    # Run Newton-Raphson Power Flow
     try:
-        pp.runpp(net, algorithm="nr", init="auto", max_iteration=50)
+        pp.runpp(net)
+        
+        lines = []
+        for idx, row in net.res_line.iterrows():
+            lines.append({
+                "index": int(idx),
+                "loading_percent": round(float(row["loading_percent"]), 2),
+                "p_from_mw": round(float(row["p_from_mw"]), 6),
+                "pl_mw": round(float(row["pl_mw"]), 6),
+                "i_ka": round(float(row["i_ka"]), 4)
+            })
+
+        return {
+            "converged": True,
+            "summary": {
+                "total_generation_kw": round(float(net.res_ext_grid["p_mw"].sum()) * 1000, 2),
+                "total_demand_kw": round((req.residential_kw + req.commercial_kw + req.industrial_kw), 2),
+                "total_loss_kw": round(float(net.res_line["pl_mw"].sum() + net.res_trafo["pl_mw"].sum()) * 1000, 2),
+                "loss_percent": round((net.res_line["pl_mw"].sum() / max(net.res_ext_grid["p_mw"].sum(), 0.01)) * 100, 2),
+            },
+            "lines": lines
+        }
     except Exception as e:
-        logger.error("Load flow failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Load flow diverged: {str(e)}")
-
-    if not net.converged:
-        raise HTTPException(status_code=500, detail="Load flow did not converge.")
-
-    # ── EXTRACT RESULTS ──────────────────────────
-    # Bus voltages
-    bus_results = []
-    for idx, row in net.res_bus.iterrows():
-        bus_results.append({
-            "index": int(idx),
-            "name": net.bus.at[idx, "name"],
-            "vm_pu": round(float(row["vm_pu"]), 4),
-            "va_degree": round(float(row["va_degree"]), 2),
-            "p_mw": round(float(row["p_mw"]), 6),
-            "q_mvar": round(float(row["q_mvar"]), 6),
-        })
-
-    # Line results
-    line_results = []
-    for idx, row in net.res_line.iterrows():
-        line_results.append({
-            "index": int(idx),
-            "name": net.line.at[idx, "name"],
-            "loading_percent": round(float(row["loading_percent"]), 2),
-            "p_from_mw": round(float(row["p_from_mw"]), 6),
-            "p_to_mw": round(float(row["p_to_mw"]), 6),
-            "pl_mw": round(float(row["pl_mw"]), 6),          # Active power loss
-            "ql_mvar": round(float(row["ql_mvar"]), 6),       # Reactive power loss
-            "i_ka": round(float(row["i_ka"]), 4),             # Current in kA
-        })
-
-    # Transformer results
-    trafo_results = []
-    for idx, row in net.res_trafo.iterrows():
-        trafo_results.append({
-            "index": int(idx),
-            "name": net.trafo.at[idx, "name"],
-            "loading_percent": round(float(row["loading_percent"]), 2),
-            "pl_mw": round(float(row["pl_mw"]), 6),
-            "ql_mvar": round(float(row["ql_mvar"]), 6),
-            "i_hv_ka": round(float(row["i_hv_ka"]), 4),
-            "i_lv_ka": round(float(row["i_lv_ka"]), 4),
-        })
-
-    # Aggregate metrics
-    total_generation_kw = round(float(net.res_ext_grid["p_mw"].sum()) * 1000, 2)
-    total_line_loss_kw  = round(float(net.res_line["pl_mw"].sum()) * 1000, 2)
-    total_trafo_loss_kw = round(float(net.res_trafo["pl_mw"].sum()) * 1000, 2)
-    total_loss_kw       = round(total_line_loss_kw + total_trafo_loss_kw, 2)
-    total_demand_kw     = round(
-        req.residential_kw + req.commercial_kw + req.industrial_kw, 2
-    )
-    total_solar_kw      = round(
-        req.residential_solar_kw + req.commercial_solar_kw + req.industrial_solar_kw, 2
-    )
-
-    return {
-        "converged": True,
-        "summary": {
-            "total_generation_kw": total_generation_kw,
-            "total_demand_kw": total_demand_kw,
-            "total_solar_kw": total_solar_kw,
-            "total_line_loss_kw": total_line_loss_kw,
-            "total_trafo_loss_kw": total_trafo_loss_kw,
-            "total_loss_kw": total_loss_kw,
-            "loss_percent": round((total_loss_kw / max(total_generation_kw, 0.01)) * 100, 2),
-        },
-        "buses": bus_results,
-        "lines": line_results,
-        "transformers": trafo_results,
-    }
-
-
-# ══════════════════════════════════════════════════
-#  PHASE 4: FAULT / SHORT-CIRCUIT ANALYSIS
-# ══════════════════════════════════════════════════
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/fault")
 @app.post("/api/fault/")
 def run_fault_analysis(req: FaultRequest):
-    """
-    Simulates a fault at the specified bus using IEC 60909.
-    Returns fault currents (kA) and voltage drops across the network.
-    """
     net = copy.deepcopy(MASTER_NET)
-
-    # Validate bus index
+    
+    # Check bus bound
     if req.bus_index < 0 or req.bus_index >= len(net.bus):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid bus_index: {req.bus_index}. Valid range: 0-{len(net.bus)-1}"
-        )
-
-    # Map fault types
-    fault_map = {
-        "3ph": "3ph",
-        "2ph": "2ph",
-        "1ph": "1ph",
-    }
-    fault = fault_map.get(req.fault_type)
-    if not fault:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid fault_type: '{req.fault_type}'. Use '3ph', '2ph', or '1ph'."
-        )
+        raise HTTPException(status_code=400, detail="Invalid bus index")
 
     try:
-        # Run short-circuit calculation (IEC 60909)
-        sc.calc_sc(net, bus=req.bus_index, fault=fault, ip=True, ith=True)
+        # IEC 60909 SC Calculation
+        sc.calc_sc(net, bus=req.bus_index, fault=req.fault_type, ip=True, ith=True)
+        
+        # SC Results
+        res = net.res_bus_sc.loc[req.bus_index]
+        
+        # Identify blackout zones (simplified: all load buses downstream of fault)
+        # In our radial grid: 2(sub) -> 3(res), 4(com), 5(ind)
+        downstream = [3, 4, 5] if req.bus_index <= 2 else [req.bus_index]
+        
+        return {
+            "faulted_bus_index": req.bus_index,
+            "faulted_bus_name": net.bus.at[req.bus_index, "name"],
+            "fault_current": {
+                "ikss_ka": round(float(res["ikss_ka"]), 4),
+                "ip_ka": round(float(res.get("ip_ka", 0)), 4)
+            },
+            "breaker_trip": True,
+            "downstream_buses_offline": downstream,
+            "blackout_zones": [net.bus.at[i, "name"] for i in downstream],
+            "faulted_line_index": 0 # Default line trip for visual
+        }
     except Exception as e:
-        logger.error("Fault analysis failed: %s", e)
+        logger.error("FAULT ERROR: %s", str(e))
         raise HTTPException(status_code=500, detail=f"Short-circuit calculation failed: {str(e)}")
 
-    # Extract fault results
-    fault_results = []
-    for idx, row in net.res_bus_sc.iterrows():
-        fault_results.append({
-            "bus_index": int(idx),
-            "bus_name": net.bus.at[idx, "name"],
-            "ikss_ka": round(float(row.get("ikss_ka", 0)), 4),   # Initial symmetrical SC current
-            "ip_ka": round(float(row.get("ip_ka", 0)), 4),       # Peak SC current
-            "ith_ka": round(float(row.get("ith_ka", 0)), 4),     # Thermal equivalent SC current
-        })
-
-    # Determine which buses are downstream of the fault
-    # (simplified: buses with index >= fault bus in our radial topology)
-    downstream_buses = [
-        int(idx) for idx in net.bus.index if idx >= req.bus_index
-    ]
-
-    # Identify affected lines
-    affected_lines = []
-    for idx, row in net.line.iterrows():
-        if int(row["from_bus"]) in downstream_buses or int(row["to_bus"]) in downstream_buses:
-            affected_lines.append({
-                "index": int(idx),
-                "name": row["name"],
-                "from_bus": int(row["from_bus"]),
-                "to_bus": int(row["to_bus"]),
-            })
-
-    # Fault bus specific data
-    faulted_bus = None
-    for r in fault_results:
-        if r["bus_index"] == req.bus_index:
-            faulted_bus = r
-            break
-
-    return {
-        "fault_type": req.fault_type,
-        "faulted_bus_index": req.bus_index,
-        "faulted_bus_name": net.bus.at[req.bus_index, "name"],
-        "fault_current": faulted_bus,
-        "all_bus_sc": fault_results,
-        "downstream_buses": downstream_buses,
-        "downstream_buses_offline": downstream_buses,
-        "affected_lines": affected_lines,
-        "faulted_line_index": affected_lines[0]["index"] if affected_lines else None,
-        "breaker_trip": True,
-        "blackout_zones": [net.bus.at[i, "name"] for i in downstream_buses if i != req.bus_index],
-    }
-
-
-# ══════════════════════════════════════════════════
-#  ENTRYPOINT (for Railway)
-# ══════════════════════════════════════════════════
+# ENTRYPOINT
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=port)
