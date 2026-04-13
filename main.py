@@ -95,7 +95,7 @@ def create_city_grid() -> pp.pandapowerNet:
         net, bus=bus_hv, vm_pu=1.02, name="Utility Grid Connection",
         s_sc_max_mva=1000, rx_max=0.1,   # Positive sequence
         s_sc_min_mva=800,  rx_min=0.1,
-        x0x_max=0.1, r0x_max=0.1,        # Zero sequence (FIX for sc calculation)
+        x0x_max=0.1, r0x0_max=0.1,        # Zero sequence (CORRECTED COL NAME)
     )
 
     # ── TRANSFORMERS ──────────────────────────────
