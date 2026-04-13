@@ -55,37 +55,25 @@ def create_city_grid() -> pp.pandapowerNet:
         x0x_max=0.1, r0x0_max=0.1, # Zero sequence resistance/reactance ratio
     )
 
-    # 3. TRANSFORMERS (With Z-sequence impedance for faults)
-    # T1: 110/33kV
-    pp.create_transformer_from_parameters(
-        net, hv_bus=bus_hv, lv_bus=bus_mv1,
-        sn_mva=63, vn_hv_kv=110, vn_lv_kv=33,
-        vkr_percent=0.1, vk_percent=10, pfe_kw=20, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1,
-        name="T1"
-    )
-    # T2: 33/11kV 
-    pp.create_transformer_from_parameters(
-        net, hv_bus=bus_mv1, lv_bus=bus_mv2,
-        sn_mva=25, vn_hv_kv=33, vn_lv_kv=11,
-        vkr_percent=0.1, vk_percent=10, pfe_kw=10, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1,
-        name="T2"
-    )
+    # 3. TRANSFORMERS (Standard Industrial Types + Custom Voltage Overrides)
+    # Using std_type ensures ALL 30+ IEC sequence parameters are pre-loaded.
+    
+    # 110/33kV (Based on 63MVA 110/20kV industrial standard)
+    t1 = pp.create_transformer(net, hv_bus=bus_hv, lv_bus=bus_mv1, 
+                          std_type="63 MVA 110/20 kV", name="T1")
+    # 33/11kV (Based on 25 MVA 110/20 kV industrial standard)
+    t2 = pp.create_transformer(net, hv_bus=bus_mv1, lv_bus=bus_mv2, 
+                          std_type="25 MVA 110/20 kV", name="T2")
 
-    # CRITICAL FIX: To avoid Pandas LossySetitemError, force column to object before setting string
-    if "vector_group" in net.trafo.columns:
-        net.trafo["vector_group"] = net.trafo["vector_group"].astype(object)
-        # Set all required SC params for transformers
-        for i in range(len(net.trafo)):
-            net.trafo.at[i, "vector_group"] = "Dyn"
-            net.trafo.at[i, "mag0_percent"] = 100.0
-            net.trafo.at[i, "mag0_rx"] = 0.4
-    else:
-        # Fallback initialization
-        net.trafo["vector_group"] = ["Dyn", "Dyn"]
-        net.trafo["mag0_percent"] = [100.0, 100.0]
-        net.trafo["mag0_rx"] = [0.4, 0.4]
+    # OVERRIDE: Fix voltages to match our 110/33/11kV city grid
+    net.trafo.at[t1, "vn_hv_kv"] = 110.0
+    net.trafo.at[t1, "vn_lv_kv"] = 33.0
+    net.trafo.at[t2, "vn_hv_kv"] = 33.0
+    net.trafo.at[t2, "vn_lv_kv"] = 11.0
+
+    # Ensure vector group is SC-compliant
+    net.trafo["vector_group"] = "Dyn"
+
 
 
 
