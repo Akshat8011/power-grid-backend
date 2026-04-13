@@ -87,6 +87,11 @@ def create_city_grid() -> pp.pandapowerNet:
         net.line["r0_ohm_per_km"] = net.line["r_ohm_per_km"] * 4
         net.line["x0_ohm_per_km"] = net.line["x_ohm_per_km"] * 4
         net.line["c0_nf_per_km"] = net.line["c_nf_per_km"]
+    
+    # 3. Sync Solar/Sgen SC Current Factor (k)
+    if len(net.sgen) > 0:
+        net.sgen["k"] = 1.0
+
 
 
 
