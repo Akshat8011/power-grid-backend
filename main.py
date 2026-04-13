@@ -44,8 +44,8 @@ ALLOWED_ORIGINS = [o for o in ALLOWED_ORIGINS if o]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False, # Must be False for wildcard origins
     allow_methods=["*"],
     allow_headers=["*"],
 )
