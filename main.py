@@ -80,13 +80,15 @@ def create_city_grid() -> pp.pandapowerNet:
     net.trafo["vkr0_percent"] = net.trafo["vkr_percent"]
     net.trafo["mag0_percent"] = 100.0
     net.trafo["mag0_rx"] = 0.4
-    net.trafo["si0_hv_partial"] = 0.9
+    net.trafo["si0_hv_partial"] = 1.0
+    net.trafo["si0_lv_partial"] = 1.0  # CRITICAL: Grounding for 1-phase faults
 
     # 2. Sync Line Zero-Sequence (if missing)
     if "r0_ohm_per_km" not in net.line.columns:
         net.line["r0_ohm_per_km"] = net.line["r_ohm_per_km"] * 4
         net.line["x0_ohm_per_km"] = net.line["x_ohm_per_km"] * 4
         net.line["c0_nf_per_km"] = net.line["c_nf_per_km"]
+
     
     # 3. Sync Solar/Sgen SC Current Factor (k)
     if len(net.sgen) > 0:
