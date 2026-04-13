@@ -36,7 +36,7 @@ app = FastAPI(
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
-    "https://my-app.vercel.app",          # ← Replace with your real Vercel URL
+    "https://load-analysis.vercel.app",
     os.getenv("FRONTEND_URL", ""),        # Railway env var override
 ]
 # Filter out empty strings
