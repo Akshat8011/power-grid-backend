@@ -404,7 +404,9 @@ def run_fault_analysis(req: FaultRequest):
         "fault_current": faulted_bus,
         "all_bus_sc": fault_results,
         "downstream_buses": downstream_buses,
+        "downstream_buses_offline": downstream_buses,
         "affected_lines": affected_lines,
+        "faulted_line_index": affected_lines[0]["index"] if affected_lines else None,
         "breaker_trip": True,
         "blackout_zones": [net.bus.at[i, "name"] for i in downstream_buses if i != req.bus_index],
     }
