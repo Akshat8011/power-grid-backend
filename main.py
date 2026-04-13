@@ -76,11 +76,17 @@ def create_city_grid() -> pp.pandapowerNet:
     # CRITICAL FIX: To avoid Pandas LossySetitemError, force column to object before setting string
     if "vector_group" in net.trafo.columns:
         net.trafo["vector_group"] = net.trafo["vector_group"].astype(object)
-        net.trafo.at[0, "vector_group"] = "Dyn"
-        net.trafo.at[1, "vector_group"] = "Dyn"
+        # Set all required SC params for transformers
+        for i in range(len(net.trafo)):
+            net.trafo.at[i, "vector_group"] = "Dyn"
+            net.trafo.at[i, "mag0_percent"] = 100.0
+            net.trafo.at[i, "mag0_rx"] = 0.4
     else:
-        # Fallback if column doesn't exist yet
+        # Fallback initialization
         net.trafo["vector_group"] = ["Dyn", "Dyn"]
+        net.trafo["mag0_percent"] = [100.0, 100.0]
+        net.trafo["mag0_rx"] = [0.4, 0.4]
+
 
 
     # 4. LINES (Manually enriched with sequence parameters)
