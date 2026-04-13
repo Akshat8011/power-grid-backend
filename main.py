@@ -61,17 +61,27 @@ def create_city_grid() -> pp.pandapowerNet:
         net, hv_bus=bus_hv, lv_bus=bus_mv1,
         sn_mva=63, vn_hv_kv=110, vn_lv_kv=33,
         vkr_percent=0.1, vk_percent=10, pfe_kw=20, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1, # Short-circuit requirement
-        name="T1: 110/33kV"
+        vk0_percent=10, vkr0_percent=0.1,
+        name="T1"
     )
-    # T2: 33/11kV (Central Substation)
+    # T2: 33/11kV 
     pp.create_transformer_from_parameters(
         net, hv_bus=bus_mv1, lv_bus=bus_mv2,
         sn_mva=25, vn_hv_kv=33, vn_lv_kv=11,
         vkr_percent=0.1, vk_percent=10, pfe_kw=10, i0_percent=0.1,
-        vk0_percent=10, vkr0_percent=0.1, # Short-circuit requirement
-        name="T2: 11/33kV"
+        vk0_percent=10, vkr0_percent=0.1,
+        name="T2"
     )
+
+    # CRITICAL FIX: To avoid Pandas LossySetitemError, force column to object before setting string
+    if "vector_group" in net.trafo.columns:
+        net.trafo["vector_group"] = net.trafo["vector_group"].astype(object)
+        net.trafo.at[0, "vector_group"] = "Dyn"
+        net.trafo.at[1, "vector_group"] = "Dyn"
+    else:
+        # Fallback if column doesn't exist yet
+        net.trafo["vector_group"] = ["Dyn", "Dyn"]
+
 
     # 4. LINES (Manually enriched with sequence parameters)
     # Standard cable metrics for 11kV: NAYY 4x50 SE (R1=0.642, X1=0.083 per km)
