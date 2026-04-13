@@ -99,14 +99,18 @@ def create_city_grid() -> pp.pandapowerNet:
 
     # ── TRANSFORMERS ──────────────────────────────
     # 110 kV → 33 kV  (Step-Down #1)
-    pp.create_transformer(
+    pp.create_transformer_from_parameters(
         net, hv_bus=bus_hv, lv_bus=bus_mv1,
-        std_type="63 MVA 110/20 kV", name="Step-Down 110→33kV"
+        sn_mva=63, vn_hv_kv=110, vn_lv_kv=33,
+        vkr_percent=0.1, vk_percent=10, pfe_kw=20, i0_percent=0.1,
+        name="Step-Down 110→33kV"
     )
     # 33 kV → 11 kV   (Step-Down #2, the City Substation)
-    pp.create_transformer(
+    pp.create_transformer_from_parameters(
         net, hv_bus=bus_mv1, lv_bus=bus_mv2,
-        std_type="25 MVA 110/20 kV", name="Substation Step-Down 33→11kV"
+        sn_mva=25, vn_hv_kv=33, vn_lv_kv=11,
+        vkr_percent=0.1, vk_percent=10, pfe_kw=10, i0_percent=0.1,
+        name="Substation Step-Down 33→11kV"
     )
 
     # ── DISTRIBUTION LINES (11 kV feeders) ────────
