@@ -1,16 +1,16 @@
-# Power Grid Digital Twin — Backend Engine
+# Power Grid Digital Twin â€” Backend Engine
 
 **pandapower** + **FastAPI** physics engine for the 3D React Three Fiber digital twin.
 
 **Live API:** [https://hehehe897-power-grid-backend.hf.space](https://hehehe897-power-grid-backend.hf.space)  
-**Frontend:** [https://load-analysis.vercel.app](https://load-analysis.vercel.app) · [Load-Analysis-Project-](https://github.com/Akshat8011/Load-Analysis-Project-)
+**Frontend:** [https://load-analysis.vercel.app](https://load-analysis.vercel.app) Â· [load-analysis](https://github.com/Akshat8011/load-analysis)
 
 ## Endpoints
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/` | Health check — grid metadata |
-| `POST` | `/api/loadflow` | Newton–Raphson load-flow analysis |
+| `GET` | `/` | Health check â€” grid metadata |
+| `POST` | `/api/loadflow` | Newtonâ€“Raphson load-flow analysis |
 | `POST` | `/api/fault` | IEC 60909 short-circuit fault simulation |
 
 ## Local development
@@ -22,7 +22,7 @@ uvicorn main:app --reload --port 8000
 
 Set `FRONTEND_URL` to your UI origin (e.g. `https://load-analysis.vercel.app`) for CORS in production.
 
-## Example — load flow
+## Example â€” load flow
 
 ```json
 POST /api/loadflow
@@ -36,7 +36,7 @@ POST /api/loadflow
 }
 ```
 
-## Example — fault study
+## Example â€” fault study
 
 ```json
 POST /api/fault
@@ -48,5 +48,5 @@ POST /api/fault
 
 ## Author
 
-**Akshat Choudhary** — Electrical Engineering + Software  
+**Akshat Choudhary** â€” Electrical Engineering + Software  
 [github.com/Akshat8011](https://github.com/Akshat8011)
